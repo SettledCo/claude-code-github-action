@@ -1,6 +1,6 @@
-name: 'Claude Code GitHub Integration'
+name: 'Claude Code GitHub Action'
 description: 'Integrates Claude Code with GitHub for automated code changes based on GitHub Issues'
-author: 'nicholaslee119'
+author: 'karsonenns'
 branding:
   icon: 'code'
   color: 'purple'
