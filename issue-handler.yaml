@@ -1,0 +1,47 @@
+name: Claude Code Issue Handler
+
+on:
+  issues:
+    types: [opened, edited, labeled] # Triggers on these issue events
+
+permissions:
+  issues: write # To comment on issues
+  contents: write # To checkout code, commit, push
+  pull-requests: write # To create PRs
+
+jobs:
+  process-issue:
+    runs-on: ubuntu-latest
+    # Only run if the issue has the 'claude-code' label
+    if: contains(github.event.issue.labels.*.name, 'claude-code')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4 # Use latest checkout action
+        with:
+          fetch-depth: 0 # Necessary for creating branches
+
+      - name: Process issue with Claude Code
+        # Use the local action defined in this repository
+        # If published, replace with: nicholaslee119/claude-code-github-action@v1 (or latest tag)
+        uses: ./ # Reference the action in the current directory
+        env:
+          # GITHUB_TOKEN is automatically available
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ANTHROPIC_API_KEY is required for the Anthropic API
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          # No mode input needed anymore
+          issue-number: ${{ github.event.issue.number }}
+          issue-body: ${{ github.event.issue.body }}
+          issue-title: ${{ github.event.issue.title }}
+          # Optional: Specify base branch if not main
+          # base-branch: 'develop'
+          # Optional: Customize branch name prefix
+          # branch-name: 'feature/claude'
+          # Optional: Customize allowed tools
+          # allowed-tools: 'Edit'
+          # Optional: Specify a different Claude model
+          # anthropic-model-id: 'anthropic.claude-3-haiku-20240307-v1:0'
+
+      # Optional: Add further steps if needed, e.g., notifications
