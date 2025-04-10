@@ -1,5 +1,5 @@
-name: 'Claude Code Action'
-description: 'Integrates Claude Code with GitHub for automated code changes based on GitHub Issues'
+name: 'Claude Agent GitHub Action'
+description: 'Integrates Claude Agent with GitHub for automated code changes based on GitHub Issues'
 author: 'karsonenns'
 branding:
   icon: 'code'
