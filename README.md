@@ -1,100 +1,207 @@
 # Claude Code GitHub Action
 
-This GitHub Action integrates the [Claude Code CLI](https://github.com/anthropics/claude-code-cli) with GitHub Actions to automatically generate code changes based on GitHub Issues.
+This GitHub Action integrates Claude Code with GitHub workflows, enabling automated code changes based on issues and PR comments. It's published on the GitHub Marketplace for easy use in your projects.
 
 ## Features
 
-- Automatically process issues with a specific label (e.g., `claude-code`) using Claude Code.
-- Generates code changes based on the issue description.
-- Creates or updates Pull Requests with the changes and a summary provided by Claude.
-- Uses the Anthropic API for Claude models.
+- Automatically process issues with a specific label using Claude Code
+- Generate code changes and create PRs with detailed summaries
+- Process PR review comments and update code accordingly
+- Support for both AWS Bedrock and Anthropic API
+- Single action with multiple operation modes
 
 ## Prerequisites
 
-- An [Anthropic API key](https://console.anthropic.com/settings/keys).
-- The GitHub repository secrets must be configured with `ANTHROPIC_API_KEY` containing your API key.
+To use this Action, you need:
+
+1. Claude Code CLI (automatically installed by the Action)
+2. Necessary credentials:
+   - For AWS Bedrock: `BEDROCK_AWS_ACCESS_KEY_ID` and `BEDROCK_AWS_SECRET_ACCESS_KEY`
+   - For Anthropic API: `ANTHROPIC_API_KEY`
+   - GitHub token: `GITHUB_TOKEN` (automatically provided) or a custom PAT token
 
 ## Usage
 
-Here's an example workflow (`.github/workflows/claude_handler.yml`) that triggers the action when an issue with the label `claude-code` is opened, edited, or labeled:
+### Processing Issues
 
 ```yaml
 name: Claude Code Issue Handler
 
 on:
   issues:
-    types: [opened, edited, labeled] # Triggers on these issue events
+    types: [opened, edited, labeled]
 
 permissions:
-  issues: write # To comment on issues
-  contents: write # To checkout code, commit, push
-  pull-requests: write # To create PRs
+  issues: write
+  contents: write
+  pull-requests: write
 
 jobs:
   process-issue:
     runs-on: ubuntu-latest
-    # Only run if the issue has the 'claude-code' label
     if: contains(github.event.issue.labels.*.name, 'claude-code')
-
+    
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Necessary for creating branches
-
+          fetch-depth: 0
+      
       - name: Process issue with Claude Code
-        # Replace with nicholaslee119/claude-code-github-action@v1 (or latest tag) if using the published action
-        uses: ./ # Uses the action in the current repository
+        uses: nicholaslee119/claude-code-github-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BEDROCK_AWS_ACCESS_KEY_ID: ${{ secrets.BEDROCK_AWS_ACCESS_KEY_ID }}
+          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ secrets.BEDROCK_AWS_SECRET_ACCESS_KEY }}
+          # If using Anthropic API instead of Bedrock:
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         with:
+          mode: 'issue'
           issue-number: ${{ github.event.issue.number }}
           issue-body: ${{ github.event.issue.body }}
           issue-title: ${{ github.event.issue.title }}
-          # Optional: Specify base branch if not main
-          # base-branch: 'develop'
-          # Optional: Customize branch name prefix
-          # branch-name: 'feature/claude'
-          # Optional: Customize allowed tools for Claude Code
-          # allowed-tools: 'Edit'
-          # Optional: Specify a different Anthropic model
-          # anthropic-model-id: 'anthropic.claude-3-haiku-20240307-v1:0'
+          base-branch: 'main'  # Adjust according to your repository
+```
+
+### Processing PR Comments
+
+```yaml
+name: Claude Code PR Review Handler
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  process-review:
+    runs-on: ubuntu-latest
+    if: github.event.issue.pull_request && startsWith(github.event.comment.body, 'Review:')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+      
+      - name: Get PR details
+        id: pr
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = context.payload.issue.number;
+            const commentId = context.payload.comment.id;
+            const reviewFeedback = context.payload.comment.body.substring(7).trim();
+            
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber
+            });
+            
+            core.setOutput('number', prNumber);
+            core.setOutput('commentId', commentId);
+            core.setOutput('feedback', reviewFeedback);
+            core.setOutput('headRef', pr.head.ref);
+      
+      - name: Process PR review with Claude Code
+        uses: nicholaslee119/claude-code-github-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEDROCK_AWS_ACCESS_KEY_ID: ${{ secrets.BEDROCK_AWS_ACCESS_KEY_ID }}
+          BEDROCK_AWS_SECRET_ACCESS_KEY: ${{ secrets.BEDROCK_AWS_SECRET_ACCESS_KEY }}
+        with:
+          mode: 'review'
+          pr-number: ${{ steps.pr.outputs.number }}
+          comment-id: ${{ steps.pr.outputs.commentId }}
+          feedback: ${{ steps.pr.outputs.feedback }}
+          head-ref: ${{ steps.pr.outputs.headRef }}
 ```
 
 ## Input Parameters
 
+### Common Parameters
+
 | Parameter | Description | Required | Default |
 |-----------|-------------|----------|---------|
-| `anthropic-model-id` | Claude model ID to use (e.g., `anthropic.claude-3-sonnet-20240229-v1:0`) | No | `anthropic.claude-3-sonnet-20240229-v1:0` |
-| `allowed-tools` | Tools to allow Claude Code to use (e.g., `Bash(git diff:*) Edit`) | No | `Bash(git diff:*) Bash(git log:*) Edit` |
-| `issue-number` | The issue number to process | Yes | - |
-| `issue-body` | The body content of the issue | Yes | - |
-| `issue-title` | The title of the issue | Yes | - |
-| `branch-name` | The base name for the branch to create (will be appended with `-<issue-number>`) | No | `claude-code/issue` |
-| `base-branch` | The base branch to create the PR against | No | `main` |
+| `mode` | Operation mode: "issue" or "review" | Yes | `issue` |
+| `aws-region` | AWS region for Bedrock | No | `us-east-2` |
+| `model-id` | Claude model ID to use | No | `anthropic.claude-3-7-sonnet-20250219-v1:0` |
+| `use-bedrock` | Whether to use AWS Bedrock (true) or Anthropic API (false) | No | `true` |
+| `cross-region-inference` | Whether to enable cross-region inference for Bedrock | No | `true` |
+| `allowed-tools` | Tools to allow Claude Code to use | No | `Bash(git diff:*) Bash(git log:*) Edit` |
+
+### Issue Mode Parameters
+
+| Parameter | Description | Required | Default |
+|-----------|-------------|----------|---------|
+| `issue-number` | The issue number to process | Yes (in issue mode) | - |
+| `issue-body` | The body content of the issue | Yes (in issue mode) | - |
+| `issue-title` | The title of the issue | Yes (in issue mode) | - |
+| `branch-name` | The name of the branch to create | No | `claude-code/issue-{issue-number}` |
+| `base-branch` | The base branch to create PR against | No | `main` |
+
+### Review Mode Parameters
+
+| Parameter | Description | Required | Default |
+|-----------|-------------|----------|---------|
+| `pr-number` | The PR number to process | Yes (in review mode) | - |
+| `comment-id` | The ID of the comment to process | Yes (in review mode) | - |
+| `feedback` | The feedback content from the comment | Yes (in review mode) | - |
+| `head-ref` | The head ref of the PR | Yes (in review mode) | - |
 
 ## Outputs
 
-| Output | Description |
-|--------|-------------|
-| `pr-number` | The number of the created or updated PR |
-| `summary` | Summary of changes made by Claude Code (extracted from Claude's output) |
+| Output | Description | Mode |
+|--------|-------------|------|
+| `pr-number` | The number of the created PR | issue |
+| `summary` | Summary of changes made by Claude Code | issue |
 
 ## How It Works
 
-1.  The workflow triggers on specified issue events (e.g., labeling an issue with `claude-code`).
-2.  The action checks out the code.
-3.  A new branch is created (or an existing one is checked out) based on the `branch-name` input and issue number.
-4.  The `claude-code` CLI is invoked with the issue body as the prompt.
-5.  If Claude makes changes, they are committed and pushed to the branch.
-6.  A Pull Request is created (or updated if one already exists for the branch) targeting the `base-branch`.
-7.  Comments are added to the original issue and/or the PR to link them and provide status updates.
+1. **Issue Processing**:
+   - When an issue with the `claude-code` label is created or updated
+   - Claude Code analyzes the issue content
+   - Code changes are generated based on the issue description
+   - A PR is created with a detailed summary of changes
+
+2. **PR Review Processing**:
+   - When a comment starting with `Review:` is added to a PR
+   - Claude Code analyzes the feedback
+   - Code is updated based on the feedback
+   - A comment is added to the PR confirming the update
 
 ## Environment Variables
 
--   `GITHUB_TOKEN`: Automatically provided by GitHub Actions. Used for checking out code, committing, pushing, and creating PRs.
--   `ANTHROPIC_API_KEY`: **Required**. Your Anthropic API key. Must be set in the workflow environment using secrets.
+- `GITHUB_TOKEN`: GitHub token for authentication (automatically provided)
+- `BEDROCK_AWS_ACCESS_KEY_ID`: AWS access key ID for Bedrock
+- `BEDROCK_AWS_SECRET_ACCESS_KEY`: AWS secret access key for Bedrock
+- `ANTHROPIC_API_KEY`: Anthropic API key (if not using Bedrock)
+
+## AWS Bedrock vs. Anthropic API
+
+This action supports two methods for accessing Claude models:
+
+### AWS Bedrock
+
+- Set `use-bedrock: 'true'`
+- Requires AWS credentials
+- Supports cross-region inference
+- Data stays within AWS environment
+- Good for enterprise environments with existing AWS infrastructure
+
+### Anthropic API
+
+- Set `use-bedrock: 'false'`
+- Requires Anthropic API key
+- Simpler setup
+- Direct access to the latest model versions
+- May provide lower latency depending on your location
 
 ## License
 
